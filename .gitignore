@@ -1,0 +1,5 @@
+.env
+*.exe
+.vscode/launch.json
+config/config.yaml
+*.db
