@@ -137,7 +137,17 @@ func (b *Bot) handleMessageCreate(m *gateway.MessageCreateEvent) {
 		return
 	}
 
-	b.Suppress(&m.Message)
+	if len(m.Embeds) == 0 {
+		if strings.Contains(m.Content, "http") {
+			ChanDeferredSuppress <- &m.Message
+			log.Printf("Message %d deferred", m.ID)
+			return
+		}
+		log.Printf("Message %d has no embeds and not potential link", m.ID)
+		return
+	} else {
+		b.Suppress(&m.Message)
+	}
 }
 
 var ChanDeferredSuppress chan *discord.Message
@@ -160,15 +170,6 @@ func (b *Bot) LateSupressLoop() {
 }
 
 func (b *Bot) Suppress(m *discord.Message) {
-	if len(m.Embeds) == 0 {
-		if strings.Contains(m.Content, "http") {
-			ChanDeferredSuppress <- m
-			log.Printf("Message %d deferred", m.ID)
-			return
-		}
-		log.Printf("Message %d has no embeds and not potential link", m.ID)
-		return
-	}
 
 	if m.Flags&discord.SuppressEmbeds != 0 {
 		return
