@@ -16,10 +16,11 @@ type User struct {
 }
 
 type Storage interface {
-	TryResetRestoreCountOnNextDay(userID, channelID uint64) error
-	ResetRestoreCount(userID, channelID uint64) error
-	GetRestoreCount(userID, channelID uint64) (int, error)
-	IncreaseRestoreCount(userID, channelID uint64) (int, error)
+	TryResetQuotaOnNextDay(userID, channelID uint64) error
+	ResetQuotaUsage(userID, channelID uint64) error
+	GetQuotaUsage(userID, channelID uint64) (int, error)
+	IncreaseQuotaUsage(userID, channelID uint64) (int, error)
+	DecreaseQuotaUsage(userID, channelID uint64) (int, error)
 	IsChannelEnabled(channelID uint64) (bool, error)
 	SetChannelEnabled(channelID uint64, enabled bool) error
 	IsChannelSuppressBot(channelID uint64) (bool, error)
@@ -78,21 +79,21 @@ func NewSQLiteStorage(dbPath string) (*SQLiteStorage, error) {
 	return &SQLiteStorage{db: db}, nil
 }
 
-func (s *SQLiteStorage) TryResetRestoreCountOnNextDay(userID, channelID uint64) error {
+func (s *SQLiteStorage) TryResetQuotaOnNextDay(userID, channelID uint64) error {
 	taipeiTime := time.Now().UTC().Add(time.Hour*8).Truncate(time.Hour * 24)
 	_, err := s.db.Exec(`UPDATE restore_counts SET count = 0, last_reset_at = CURRENT_TIMESTAMP
 WHERE user_id = ? AND channel_id = ? AND last_reset_at < ?`, userID, channelID, taipeiTime)
 	return err
 }
 
-func (s *SQLiteStorage) ResetRestoreCount(userID, channelID uint64) error {
+func (s *SQLiteStorage) ResetQuotaUsage(userID, channelID uint64) error {
 	_, err := s.db.Exec(`INSERT INTO restore_counts (user_id, channel_id) VALUES (?, ?)
 ON CONFLICT(user_id, channel_id) DO UPDATE SET count = 0, last_reset_at = CURRENT_TIMESTAMP`, userID, channelID)
 	return err
 }
 
-func (s *SQLiteStorage) GetRestoreCount(userID, channelID uint64) (int, error) {
-	err := s.TryResetRestoreCountOnNextDay(userID, channelID)
+func (s *SQLiteStorage) GetQuotaUsage(userID, channelID uint64) (int, error) {
+	err := s.TryResetQuotaOnNextDay(userID, channelID)
 	if err != nil {
 		return 0, err
 	}
@@ -102,12 +103,24 @@ func (s *SQLiteStorage) GetRestoreCount(userID, channelID uint64) (int, error) {
 	return count, err
 }
 
-func (s *SQLiteStorage) IncreaseRestoreCount(userID, channelID uint64) (int, error) {
+func (s *SQLiteStorage) IncreaseQuotaUsage(userID, channelID uint64) (int, error) {
 	var count int
 	err := s.db.QueryRow(`
 		INSERT INTO restore_counts (user_id, channel_id, count)
 		VALUES (?, ?, 0)
 		ON CONFLICT(user_id, channel_id) DO UPDATE SET count = count + 1
+		RETURNING count
+	`, userID, channelID).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (s *SQLiteStorage) DecreaseQuotaUsage(userID, channelID uint64) (int, error) {
+	var count int
+	err := s.db.QueryRow(`
+		UPDATE restore_counts SET count = count - 1 WHERE user_id = ? AND channel_id = ? AND count > 0
 		RETURNING count
 	`, userID, channelID).Scan(&count)
 	if err != nil {

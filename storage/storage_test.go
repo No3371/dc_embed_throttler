@@ -31,7 +31,7 @@ func TestSQLiteStorage_ConcurrentReadWriteRestoreCount(t *testing.T) {
 			wg.Wait()
 			defer wg2.Done()
 			for j := 0; j < 1000; j++ {
-				_, err := db.IncreaseRestoreCount(userID, channelID)
+				_, err := db.IncreaseQuotaUsage(userID, channelID)
 				if err != nil {
 					results <- err
 				}
@@ -44,7 +44,7 @@ func TestSQLiteStorage_ConcurrentReadWriteRestoreCount(t *testing.T) {
 			wg.Wait()
 			defer wg2.Done()
 			for j := 0; j < 1000; j++ {
-				err := db.ResetRestoreCount(userID, channelID)
+				err := db.ResetQuotaUsage(userID, channelID)
 				if err != nil {
 					results <- err
 				}

@@ -15,12 +15,17 @@ type Config struct {
 
 func LoadConfig() (*Config, error) {
 	pflag.Bool("update_commands", false, "Update commands")
+	dev := pflag.Bool("dev", false, "Development mode")
 	pflag.Parse()
 	viper.BindPFlag("update_commands", pflag.Lookup("update_commands"))
-	viper.SetConfigName("config")
+	if *dev {
+		viper.SetConfigName("config_dev")
+	} else {
+		viper.SetConfigName("config")
+	}
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(".")
-	viper.AddConfigPath("./config")
+		viper.AddConfigPath("./config")
 
 	// Set defaults
 	viper.SetDefault("default_quota", 3)

@@ -46,16 +46,28 @@ func (b *Bot) Start(ctx context.Context) error {
 	b.s.AddHandler(func(m *gateway.ReadyEvent) {
 		fmt.Printf("Ready!")
 		if b.config.UpdateCommands {
+
+			liveCmds, err := b.s.Commands(discord.AppID(b.s.Ready().Application.ID))
+			if err != nil {
+				log.Printf("Error getting commands: %v", err)
+			}
+			for _, cmd := range liveCmds {
+				switch cmd.Name {
+				case "restore_embeds":
+					b.s.DeleteCommand(discord.AppID(b.s.Ready().Application.ID), cmd.ID)
+				}
+			}
+
 			perms := discord.PermissionManageChannels
 			cmds, err := b.s.BulkOverwriteCommands(discord.AppID(b.s.Ready().Application.ID), []api.CreateCommandData{
 				{
-					Name: "restore_embeds",
+					Name: "suppress_embeds",
 					Type: discord.MessageCommand,
 					NameLocalizations: map[discord.Language]string{
-						discord.EnglishUS:     "Restore Embeds",
-						discord.ChineseChina:  "展開嵌入",
-						discord.ChineseTaiwan: "展開嵌入",
-						discord.Japanese:      "埋め込みを展開する",
+						discord.EnglishUS:     "Suppress Embeds",
+						discord.ChineseChina:  "抑制嵌入",
+						discord.ChineseTaiwan: "抑制嵌入",
+						discord.Japanese:      "埋め込みを抑制する",
 					},
 				},
 				{
@@ -112,6 +124,11 @@ func (b *Bot) Start(ctx context.Context) error {
 					Type:                     discord.ChatInputCommand,
 					DefaultMemberPermissions: &perms,
 				},
+				{
+					Name:                     "my_quota",
+					Description:              "查看個人嵌入額度",
+					Type:                     discord.ChatInputCommand,
+				},
 			})
 			if err != nil {
 				log.Printf("Error overwriting commands: %v", err)
@@ -121,7 +138,7 @@ func (b *Bot) Start(ctx context.Context) error {
 	})
 
 	b.s.AddIntents(gateway.IntentGuilds | gateway.IntentGuildMessages | gateway.IntentMessageContent)
-	ChanDeferredSuppress = make(chan *discord.Message, 32)
+	ChanDeferredSuppress = make(chan *gateway.MessageCreateEvent, 32)
 	go b.LateSupressLoop()
 	return b.s.Open(ctx)
 }
@@ -139,33 +156,81 @@ func (b *Bot) handleMessageCreate(m *gateway.MessageCreateEvent) {
 
 	if len(m.Embeds) == 0 {
 		if strings.Contains(m.Content, "http") {
-			ChanDeferredSuppress <- &m.Message
+			ChanDeferredSuppress <- m
 			log.Printf("Message %d deferred", m.ID)
 			return
 		}
 		log.Printf("Message %d has no embeds and not potential link", m.ID)
 		return
 	} else {
-		b.Suppress(&m.Message)
+		b.TrySurpress(m)
 	}
 }
 
-var ChanDeferredSuppress chan *discord.Message
+var ChanDeferredSuppress chan *gateway.MessageCreateEvent
 
 func (b *Bot) LateSupressLoop() {
 	for {
-		msg := <-ChanDeferredSuppress
-		if time.Since(msg.Timestamp.Time()) < time.Millisecond*100 {
+		mv := <-ChanDeferredSuppress
+		if time.Since(mv.Timestamp.Time()) < time.Millisecond*100 {
 			time.Sleep(time.Millisecond * 100)
 		}
 
-		msg, err := b.s.Message(msg.ChannelID, msg.ID)
+		msg, err := b.s.Message(mv.ChannelID, mv.ID)
 		if err != nil {
 			log.Printf("Error getting message: %v", err)
 			continue
 		}
 
-		b.Suppress(msg)
+		if len(msg.Embeds) == 0 {
+			continue
+		}
+
+
+		b.TrySurpress(mv)
+	}
+}
+
+func (b *Bot) TrySurpress(m *gateway.MessageCreateEvent) {
+	err := b.storage.TryResetQuotaOnNextDay(uint64(m.Author.ID), uint64(m.ChannelID))
+	if err != nil {
+		log.Printf("Error resetting restore count: %v", err)
+	}
+
+	usage, err := b.storage.GetQuotaUsage(uint64(m.Author.ID), uint64(m.ChannelID))
+	if errors.Is(err, sql.ErrNoRows) {
+		err = b.storage.ResetQuotaUsage(uint64(m.Author.ID), uint64(m.ChannelID))
+	}
+	if err != nil {
+		log.Printf("Error getting restore count: %v", err)
+	}
+
+	roleIDs := make([]uint64, len(m.Member.RoleIDs))
+	for i, roleID := range m.Member.RoleIDs {
+		roleIDs[i] = uint64(roleID)
+	}
+	quota, err := b.storage.GetQuotaByRoles(uint64(m.ChannelID), roleIDs)
+	if errors.Is(err, sql.ErrNoRows) {
+		quota = b.config.DefaultQuota
+		err = nil
+	}
+	if err != nil {
+		log.Printf("Error getting quota by roles: %v", err)
+	}
+	if quota == -1 {
+		quota = b.config.DefaultQuota
+	}
+
+	if usage < quota {
+		b.storage.IncreaseQuotaUsage(uint64(m.Author.ID), uint64(m.ChannelID))
+	} else {
+		if usage == quota {
+			err = b.s.React(m.ChannelID, m.ID, discord.NewAPIEmoji(0, "🈚"))
+			if err != nil {
+				log.Printf("Error reacting to message: %v", err)
+			}
+		}
+		b.Suppress(&m.Message)
 	}
 }
 
@@ -183,11 +248,6 @@ func (b *Bot) Suppress(m *discord.Message) {
 	if err != nil {
 		log.Printf("Error suppressing embeds: %v", err)
 	}
-
-	// err = b.s.React(m.ChannelID, m.ID, discord.NewAPIEmoji(0, "🈲"))
-	// if err != nil {
-	// 	log.Printf("Error reacting to message: %v", err)
-	// }
 
 	if m.Author.Bot {
 		channelSuppressingBot, err := b.storage.IsChannelSuppressBot(uint64(m.ChannelID))
@@ -215,14 +275,14 @@ func (b *Bot) Suppress(m *discord.Message) {
 		}
 
 		factor := int(math.Pow(2, float64(min(5, user.Hinted))))
-		var cooldown = 24*factor
+		var cooldown = 24 * factor
 
-		_, err = b.s.SendMessage(ch.ID, fmt.Sprintf("<#%d>頻道已啟用嵌入限流，您方才發送的訊息已抑制嵌入。\n若有需要請右鍵該訊息 > APP 選單中選擇「展開嵌入」\n-# - 每人每天有固定展開嵌入額度\n-# - %d 小時內不會再收到此提示", m.ChannelID, cooldown))
+		_, err = b.s.SendMessage(ch.ID, fmt.Sprintf("<#%d>頻道已啟用嵌入限流，您方才發送的訊息已抑制嵌入。\n若有需要回收遷入額度請右鍵訊息 > APP 選單中選擇「抑制嵌入」\n-# - 每人每天有限量嵌入額度\n-# - %d 小時內不會再收到此提示", m.ChannelID, cooldown))
 		if err != nil {
 			log.Printf("Error sending message: %v", err)
 		}
 
-		err = b.storage.SetNextHintAt(uint64(m.Author.ID), time.Now().Add(time.Duration(cooldown) * time.Hour))
+		err = b.storage.SetNextHintAt(uint64(m.Author.ID), time.Now().Add(time.Duration(cooldown)*time.Hour))
 		if err != nil {
 			log.Printf("Error setting next hint at: %v", err)
 		}
@@ -286,8 +346,8 @@ func (b *Bot) handleInteractionCreate(e *gateway.InteractionCreateEvent) {
 		case discord.PingInteractionType:
 		case discord.CommandInteractionType:
 			switch e.Data.(*discord.CommandInteraction).Name {
-			case "restore_embeds":
-				err = b.handleRestoreEmbeds(e)
+			case "suppress_embeds":
+				err = b.handleSuppressEmbeds(e)
 			case "toggle_channel":
 				err = b.handleToggleChannel(e)
 			case "set_role_quota":
@@ -298,6 +358,8 @@ func (b *Bot) handleInteractionCreate(e *gateway.InteractionCreateEvent) {
 				err = b.handleToggleSuppressBot(e)
 			case "list_role_quotas":
 				err = b.handleListRoleQuotas(e)
+			case "my_quota":
+				err = b.handleMyQuota(e)
 			}
 		case discord.ComponentInteractionType:
 		case discord.AutocompleteInteractionType:
@@ -312,7 +374,7 @@ func (b *Bot) handleInteractionCreate(e *gateway.InteractionCreateEvent) {
 	}
 }
 
-func (b *Bot) handleRestoreEmbeds(e *gateway.InteractionCreateEvent) error {
+func (b *Bot) handleSuppressEmbeds(e *gateway.InteractionCreateEvent) error {
 	sender := e.SenderID()
 	channelId := e.ChannelID
 	data := e.Data.(*discord.CommandInteraction)
@@ -339,10 +401,9 @@ func (b *Bot) handleRestoreEmbeds(e *gateway.InteractionCreateEvent) error {
 			})
 		}
 	}
-
-	if msg.Flags&discord.SuppressEmbeds == 0 {
+	if msg.Flags&discord.SuppressEmbeds > 0 {
 		respd := api.InteractionResponseData{
-			Content: option.NewNullableString("-# ❌ 此訊息未被抑制嵌入"),
+			Content: option.NewNullableString("-# ❌ 此訊息已抑制嵌入"),
 			Flags:   discord.EphemeralMessage,
 		}
 		return b.s.RespondInteraction(e.ID, e.Token, api.InteractionResponse{
@@ -351,55 +412,38 @@ func (b *Bot) handleRestoreEmbeds(e *gateway.InteractionCreateEvent) error {
 		})
 	}
 
-	err := b.storage.TryResetRestoreCountOnNextDay(uint64(sender), uint64(channelId))
-	if err != nil {
-		log.Printf("Error resetting restore count: %v", err)
+	if time.Since(msg.Timestamp.Time()) > time.Minute {
+		return b.s.RespondInteraction(e.ID, e.Token, api.InteractionResponse{
+			Type: api.MessageInteractionWithSource,
+			Data: &api.InteractionResponseData{
+				Content: option.NewNullableString("-# ❌ 無法在一分鐘後回收額度"),
+				Flags: discord.EphemeralMessage,
+			},
+		})
 	}
 
-	restoreCount, err := b.storage.GetRestoreCount(uint64(sender), uint64(channelId))
-	if errors.Is(err, sql.ErrNoRows) {
-		err = b.storage.ResetRestoreCount(uint64(sender), uint64(channelId))
-	}
+	flags := msg.Flags | discord.SuppressEmbeds
+	// Suppress embeds for the message
+	_, err := b.s.EditMessageComplex(msg.ChannelID, msg.ID, api.EditMessageData{
+		Flags: &flags,
+	})
+
+	remaining, err := b.storage.DecreaseQuotaUsage(uint64(sender), uint64(channelId))
 	if err != nil {
-		log.Printf("Error getting restore count: %v", err)
+		log.Printf("Error decrementing restore count: %v", err)
 	}
 
 	roleIDs := make([]uint64, len(e.Member.RoleIDs))
 	for i, roleID := range e.Member.RoleIDs {
 		roleIDs[i] = uint64(roleID)
 	}
-	quota, err := b.storage.GetQuotaByRoles(uint64(channelId), roleIDs)
+	quota, err := b.storage.GetQuotaByRoles(uint64(e.ChannelID), roleIDs)
 	if errors.Is(err, sql.ErrNoRows) {
 		quota = b.config.DefaultQuota
 		err = nil
 	}
 	if err != nil {
 		log.Printf("Error getting quota by roles: %v", err)
-	}
-	if quota == -1 {
-		quota = b.config.DefaultQuota
-	}
-
-	if restoreCount >= quota {
-		respd := api.InteractionResponseData{
-			Content: option.NewNullableString(fmt.Sprintf("-# ❌ 已耗盡頻道展開額度 %d/%d （UTC+8 每日午夜重置）", restoreCount, quota)),
-			Flags:   discord.EphemeralMessage,
-		}
-		return b.s.RespondInteraction(e.ID, e.Token, api.InteractionResponse{
-			Type: api.MessageInteractionWithSource,
-			Data: &respd,
-		})
-	}
-
-	flags := msg.Flags & ^discord.SuppressEmbeds
-	// Suppress embeds for the message
-	_, err = b.s.EditMessageComplex(msg.ChannelID, msg.ID, api.EditMessageData{
-		Flags: &flags,
-	})
-
-	remaining, err := b.storage.IncreaseRestoreCount(uint64(sender), uint64(channelId))
-	if err != nil {
-		log.Printf("Error incrementing restore count: %v", err)
 	}
 
 	respd := api.InteractionResponseData{
@@ -414,10 +458,6 @@ func (b *Bot) handleRestoreEmbeds(e *gateway.InteractionCreateEvent) error {
 		log.Printf("Error responding to interaction: %v", err)
 	}
 
-	// err = b.s.Unreact(msg.ChannelID, msg.ID, discord.NewAPIEmoji(0, "🈲"))
-	// if err != nil {
-	// 	log.Printf("Error unreacting to message: %v", err)
-	// }
 	return err
 }
 
@@ -548,7 +588,7 @@ func (b *Bot) handleResetQuota(i *gateway.InteractionCreateEvent) error {
 		return err
 	}
 
-	err = b.storage.ResetRestoreCount(uint64(userID), uint64(i.ChannelID))
+	err = b.storage.ResetQuotaUsage(uint64(userID), uint64(i.ChannelID))
 	if err != nil {
 		return err
 	}
@@ -583,4 +623,34 @@ func (b *Bot) handleListRoleQuotas(i *gateway.InteractionCreateEvent) error {
 		Type: api.MessageInteractionWithSource,
 		Data: &respd,
 	})
+}
+
+func (b *Bot) handleMyQuota(e *gateway.InteractionCreateEvent) error {
+	usage, err := b.storage.GetQuotaUsage(uint64(e.Member.User.ID), uint64(e.ChannelID))
+	if err != nil {
+		return err
+	}
+
+	roleIDs := make([]uint64, len(e.Member.RoleIDs))
+	for i, roleID := range e.Member.RoleIDs {
+		roleIDs[i] = uint64(roleID)
+	}
+	quota, err := b.storage.GetQuotaByRoles(uint64(e.ChannelID), roleIDs)
+	if errors.Is(err, sql.ErrNoRows) {
+		quota = b.config.DefaultQuota
+		err = nil
+	}
+	if err != nil {
+		log.Printf("Error getting quota by roles: %v", err)
+	}
+
+	respd := api.InteractionResponseData{
+		Content: option.NewNullableString(fmt.Sprintf("-# ✅ 於此頻道展開額度：%d/%d", quota-usage, quota)),
+		Flags:   discord.EphemeralMessage,
+	}
+	err = b.s.RespondInteraction(e.ID, e.Token, api.InteractionResponse{
+		Type: api.MessageInteractionWithSource,
+		Data: &respd,
+	})
+	return err
 }
