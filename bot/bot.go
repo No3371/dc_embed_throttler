@@ -627,6 +627,9 @@ func (b *Bot) handleListRoleQuotas(i *gateway.InteractionCreateEvent) error {
 
 func (b *Bot) handleMyQuota(e *gateway.InteractionCreateEvent) error {
 	usage, err := b.storage.GetQuotaUsage(uint64(e.Member.User.ID), uint64(e.ChannelID))
+	if errors.Is(err, sql.ErrNoRows) {
+		err = b.storage.ResetQuotaUsage(uint64(e.Member.User.ID), uint64(e.ChannelID))
+	}
 	if err != nil {
 		return err
 	}
