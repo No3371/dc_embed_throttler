@@ -186,6 +186,7 @@ func (b *Bot) LateSupressLoop() {
 			continue
 		}
 
+		mv.Embeds = msg.Embeds
 
 		b.TrySurpress(mv)
 	}
@@ -221,8 +222,8 @@ func (b *Bot) TrySurpress(m *gateway.MessageCreateEvent) {
 		quota = b.config.DefaultQuota
 	}
 
-	if usage < quota {
-		b.storage.IncreaseQuotaUsage(uint64(m.Author.ID), uint64(m.ChannelID))
+	if usage + len(m.Embeds) <= quota {
+		b.storage.IncreaseQuotaUsage(uint64(m.Author.ID), uint64(m.ChannelID), len(m.Embeds))
 	} else {
 		if usage == quota {
 			err = b.s.React(m.ChannelID, m.ID, discord.NewAPIEmoji(0, "🈚"))
@@ -277,7 +278,7 @@ func (b *Bot) Suppress(m *discord.Message) {
 		factor := int(math.Pow(2, float64(min(5, user.Hinted))))
 		var cooldown = 24 * factor
 
-		_, err = b.s.SendMessage(ch.ID, fmt.Sprintf("<#%d>頻道已啟用嵌入限流，您方才發送的訊息已抑制嵌入。\n若有需要回收遷入額度請右鍵訊息 > APP 選單中選擇「抑制嵌入」\n-# - 每人每天有限量嵌入額度\n-# - %d 小時內不會再收到此提示", m.ChannelID, cooldown))
+		_, err = b.s.SendMessage(ch.ID, fmt.Sprintf("<#%d>頻道已啟用嵌入限流，您方才發送的訊息已抑制嵌入。\n若有需要回收嵌入額度請右鍵訊息 > APP 選單中選擇「抑制嵌入」\n-# - 每人每天有限量嵌入額度\n-# - %d 小時內不會再收到此提示", m.ChannelID, cooldown))
 		if err != nil {
 			log.Printf("Error sending message: %v", err)
 		}
@@ -428,7 +429,7 @@ func (b *Bot) handleSuppressEmbeds(e *gateway.InteractionCreateEvent) error {
 		Flags: &flags,
 	})
 
-	remaining, err := b.storage.DecreaseQuotaUsage(uint64(sender), uint64(channelId))
+	remaining, err := b.storage.DecreaseQuotaUsage(uint64(sender), uint64(channelId), len(msg.Embeds))
 	if err != nil {
 		log.Printf("Error decrementing restore count: %v", err)
 	}

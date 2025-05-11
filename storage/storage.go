@@ -19,8 +19,8 @@ type Storage interface {
 	TryResetQuotaOnNextDay(userID, channelID uint64) error
 	ResetQuotaUsage(userID, channelID uint64) error
 	GetQuotaUsage(userID, channelID uint64) (int, error)
-	IncreaseQuotaUsage(userID, channelID uint64) (int, error)
-	DecreaseQuotaUsage(userID, channelID uint64) (int, error)
+	IncreaseQuotaUsage(userID, channelID uint64, delta int) (int, error)
+	DecreaseQuotaUsage(userID, channelID uint64, delta int) (int, error)
 	IsChannelEnabled(channelID uint64) (bool, error)
 	SetChannelEnabled(channelID uint64, enabled bool) error
 	IsChannelSuppressBot(channelID uint64) (bool, error)
@@ -103,26 +103,26 @@ func (s *SQLiteStorage) GetQuotaUsage(userID, channelID uint64) (int, error) {
 	return count, err
 }
 
-func (s *SQLiteStorage) IncreaseQuotaUsage(userID, channelID uint64) (int, error) {
+func (s *SQLiteStorage) IncreaseQuotaUsage(userID, channelID uint64, delta int) (int, error) {
 	var count int
 	err := s.db.QueryRow(`
 		INSERT INTO restore_counts (user_id, channel_id, count)
 		VALUES (?, ?, 0)
-		ON CONFLICT(user_id, channel_id) DO UPDATE SET count = count + 1
+		ON CONFLICT(user_id, channel_id) DO UPDATE SET count = count + ?
 		RETURNING count
-	`, userID, channelID).Scan(&count)
+	`, userID, channelID, delta).Scan(&count)
 	if err != nil {
 		return 0, err
 	}
 	return count, nil
 }
 
-func (s *SQLiteStorage) DecreaseQuotaUsage(userID, channelID uint64) (int, error) {
+func (s *SQLiteStorage) DecreaseQuotaUsage(userID, channelID uint64, delta int) (int, error) {
 	var count int
 	err := s.db.QueryRow(`
-		UPDATE restore_counts SET count = count - 1 WHERE user_id = ? AND channel_id = ? AND count > 0
+		UPDATE restore_counts SET count = count - ? WHERE user_id = ? AND channel_id = ? AND count > 0
 		RETURNING count
-	`, userID, channelID).Scan(&count)
+	`, delta, userID, channelID).Scan(&count)
 	if err != nil {
 		return 0, err
 	}
