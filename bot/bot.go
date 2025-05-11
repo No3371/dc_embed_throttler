@@ -125,9 +125,9 @@ func (b *Bot) Start(ctx context.Context) error {
 					DefaultMemberPermissions: &perms,
 				},
 				{
-					Name:                     "my_quota",
-					Description:              "查看個人嵌入額度",
-					Type:                     discord.ChatInputCommand,
+					Name:        "my_quota",
+					Description: "查看個人嵌入額度",
+					Type:        discord.ChatInputCommand,
 				},
 			})
 			if err != nil {
@@ -172,8 +172,12 @@ var ChanDeferredSuppress chan *gateway.MessageCreateEvent
 func (b *Bot) LateSupressLoop() {
 	for {
 		mv := <-ChanDeferredSuppress
-		if time.Since(mv.Timestamp.Time()) < time.Millisecond*100 {
-			time.Sleep(time.Millisecond * 100)
+
+		var countHttp int64 = int64(strings.Count(mv.Content, "http"))
+		countHttp = min(countHttp, 10)
+
+		if time.Since(mv.Timestamp.Time()) < time.Millisecond*time.Duration(countHttp*int64(time.Millisecond)*125) {
+			time.Sleep(time.Millisecond*time.Duration(countHttp*int64(time.Millisecond)*125) - time.Since(mv.Timestamp.Time()))
 		}
 
 		msg, err := b.s.Message(mv.ChannelID, mv.ID)
@@ -183,6 +187,7 @@ func (b *Bot) LateSupressLoop() {
 		}
 
 		if len(msg.Embeds) == 0 {
+			log.Printf("(Deferred)Message %d has no embeds and not potential link", msg.ID)
 			continue
 		}
 
@@ -222,7 +227,7 @@ func (b *Bot) TrySurpress(m *gateway.MessageCreateEvent) {
 		quota = b.config.DefaultQuota
 	}
 
-	if usage + len(m.Embeds) <= quota {
+	if usage+len(m.Embeds) <= quota {
 		b.storage.IncreaseQuotaUsage(uint64(m.Author.ID), uint64(m.ChannelID), len(m.Embeds))
 	} else {
 		if usage == quota {
@@ -418,7 +423,7 @@ func (b *Bot) handleSuppressEmbeds(e *gateway.InteractionCreateEvent) error {
 			Type: api.MessageInteractionWithSource,
 			Data: &api.InteractionResponseData{
 				Content: option.NewNullableString("-# ❌ 無法在一分鐘後回收額度"),
-				Flags: discord.EphemeralMessage,
+				Flags:   discord.EphemeralMessage,
 			},
 		})
 	}
