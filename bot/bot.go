@@ -157,7 +157,7 @@ func (b *Bot) handleMessageCreate(m *gateway.MessageCreateEvent) {
 	if len(m.Embeds) == 0 {
 		if strings.Contains(m.Content, "http") {
 			ChanDeferredSuppress <- m
-			log.Printf("Message %d in #%d deferred", m.ID, m.ChannelID)
+			log.Printf("Message %d in #%d deferred (%d)", m.ID, m.ChannelID, len(ChanDeferredSuppress))
 			return
 		}
 		log.Printf("Message %d in #%d has no embeds and not potential link", m.ID, m.ChannelID)
@@ -176,8 +176,8 @@ func (b *Bot) LateSupressLoop() {
 		var countHttp int64 = int64(strings.Count(mv.Content, "http"))
 		countHttp = min(countHttp, 10)
 
-		if time.Since(mv.Timestamp.Time()) < time.Millisecond*time.Duration(countHttp*int64(time.Millisecond)*125) {
-			time.Sleep(time.Millisecond*time.Duration(countHttp*int64(time.Millisecond)*125) - time.Since(mv.Timestamp.Time()))
+		if time.Since(mv.Timestamp.Time()) < time.Duration(countHttp*int64(time.Millisecond)*125) {
+			time.Sleep(time.Duration(countHttp*int64(time.Millisecond)*125) - time.Since(mv.Timestamp.Time()))
 		}
 
 		msg, err := b.s.Message(mv.ChannelID, mv.ID)
