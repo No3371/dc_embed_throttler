@@ -157,10 +157,10 @@ func (b *Bot) handleMessageCreate(m *gateway.MessageCreateEvent) {
 	if len(m.Embeds) == 0 {
 		if strings.Contains(m.Content, "http") {
 			ChanDeferredSuppress <- m
-			log.Printf("Message %d deferred", m.ID)
+			log.Printf("Message %d in #%d deferred", m.ID, m.ChannelID)
 			return
 		}
-		log.Printf("Message %d has no embeds and not potential link", m.ID)
+		log.Printf("Message %d in #%d has no embeds and not potential link", m.ID, m.ChannelID)
 		return
 	} else {
 		b.TrySurpress(m)
@@ -187,7 +187,7 @@ func (b *Bot) LateSupressLoop() {
 		}
 
 		if len(msg.Embeds) == 0 {
-			log.Printf("(Deferred)Message %d has no embeds and not potential link", msg.ID)
+			log.Printf("(Deferred) Message %d has no embeds and not potential link", msg.ID)
 			continue
 		}
 
@@ -258,7 +258,7 @@ func (b *Bot) Suppress(m *discord.Message) {
 	if m.Author.Bot {
 		channelSuppressingBot, err := b.storage.IsChannelSuppressBot(uint64(m.ChannelID))
 		if err != nil {
-			log.Printf("Error checking channel status: %v", err)
+			log.Printf("Error checking if channel is suppressing bot: %v", err)
 			return
 		}
 		if !channelSuppressingBot {
@@ -271,7 +271,8 @@ func (b *Bot) Suppress(m *discord.Message) {
 		err = nil
 	}
 	if err != nil {
-		log.Printf("Error getting last hint at: %v", err)
+		log.Printf("Error getting last hint at for user %d: %v", m.Author.ID, err)
+		return
 	}
 
 	if !m.Author.Bot && time.Now().After(user.NextHintAt) {
@@ -292,6 +293,8 @@ func (b *Bot) Suppress(m *discord.Message) {
 		if err != nil {
 			log.Printf("Error setting next hint at: %v", err)
 		}
+
+		log.Printf("Sent hint to %d", m.Author.ID)
 	}
 }
 
