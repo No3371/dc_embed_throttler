@@ -138,7 +138,7 @@ func (b *Bot) Start(ctx context.Context) error {
 	})
 
 	b.s.AddIntents(gateway.IntentGuilds | gateway.IntentGuildMessages | gateway.IntentMessageContent)
-	ChanDeferredSuppress = make(chan *gateway.MessageCreateEvent, 32)
+	ChanDeferredSuppress = make(chan *gateway.MessageCreateEvent, 64)
 	go b.LateSupressLoop()
 	return b.s.Open(ctx)
 }
@@ -230,7 +230,7 @@ func (b *Bot) TrySurpress(m *gateway.MessageCreateEvent) {
 	if usage+len(m.Embeds) <= quota {
 		b.storage.IncreaseQuotaUsage(uint64(m.Author.ID), uint64(m.ChannelID), len(m.Embeds))
 	} else {
-		if usage == quota {
+		if usage >= quota {
 			err = b.s.React(m.ChannelID, m.ID, discord.NewAPIEmoji(0, "🈚"))
 			if err != nil {
 				log.Printf("Error reacting to message: %v", err)
@@ -246,15 +246,6 @@ func (b *Bot) Suppress(m *discord.Message) {
 		return
 	}
 
-	flags := m.Flags | discord.SuppressEmbeds
-	// Suppress embeds for the message
-	_, err := b.s.EditMessageComplex(m.ChannelID, m.ID, api.EditMessageData{
-		Flags: &flags,
-	})
-	if err != nil {
-		log.Printf("Error suppressing embeds: %v", err)
-	}
-
 	if m.Author.Bot {
 		channelSuppressingBot, err := b.storage.IsChannelSuppressBot(uint64(m.ChannelID))
 		if err != nil {
@@ -265,6 +256,17 @@ func (b *Bot) Suppress(m *discord.Message) {
 			return
 		}
 	}
+
+	flags := m.Flags | discord.SuppressEmbeds
+	// Suppress embeds for the message
+	_, err := b.s.EditMessageComplex(m.ChannelID, m.ID, api.EditMessageData{
+		Flags: &flags,
+	})
+	if err != nil {
+		log.Printf("Error suppressing embeds for %d: %v", m.ID, err)
+	}
+
+	log.Printf("Suppressing embeds for %d in #%d", m.ID, m.ChannelID)
 
 	user, err := b.storage.GetUser(uint64(m.Author.ID))
 	if errors.Is(err, sql.ErrNoRows) {
