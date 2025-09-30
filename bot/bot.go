@@ -322,6 +322,10 @@ func init() {
 }
 
 func (b *Bot) handleInteractionCreate(e *gateway.InteractionCreateEvent) {
+	if e.Member == nil {
+		return
+	}
+
 	var err error
 	defer func() {
 		interactionTokenCache.Delete(e.Token)
