@@ -56,16 +56,16 @@ func (b *Bot) Start(ctx context.Context) error {
 		fmt.Printf("Ready!")
 		if b.config.UpdateCommands {
 
-			liveCmds, err := b.s.Commands(discord.AppID(b.s.Ready().Application.ID))
-			if err != nil {
-				log.Printf("Error getting commands: %v", err)
-			}
-			for _, cmd := range liveCmds {
-				switch cmd.Name {
-				case "restore_embeds":
-					b.s.DeleteCommand(discord.AppID(b.s.Ready().Application.ID), cmd.ID)
-				}
-			}
+			// liveCmds, err := b.s.Commands(discord.AppID(b.s.Ready().Application.ID))
+			// if err != nil {
+			// 	log.Printf("Error getting commands: %v", err)
+			// }
+			// for _, cmd := range liveCmds {
+			// 	switch cmd.Name {
+			// 	case "restore_embeds":
+			// 		b.s.DeleteCommand(discord.AppID(b.s.Ready().Application.ID), cmd.ID)
+			// 	}
+			// }
 
 			perms := discord.PermissionManageChannels
 			cmds, err := b.s.BulkOverwriteCommands(discord.AppID(b.s.Ready().Application.ID), []api.CreateCommandData{
@@ -373,6 +373,8 @@ func (b *Bot) handleInteractionCreate(e *gateway.InteractionCreateEvent) {
 		}
 	}()
 
+	var name string = "?"
+
 	itCache := InteractionTokenCache{
 		CreatedAt: time.Now(),
 		IType:     e.Data.InteractionType(),
@@ -380,12 +382,16 @@ func (b *Bot) handleInteractionCreate(e *gateway.InteractionCreateEvent) {
 	switch data := e.Data.(type) {
 	case *discord.CommandInteraction:
 		itCache.Id = data.Name
+		name = data.Name
 	case *discord.ButtonInteraction:
 		itCache.Id = string(data.CustomID)
+		name = string(data.CustomID)
 	case *discord.StringSelectInteraction:
 		itCache.Id = string(data.CustomID)
+		name = string(data.CustomID)
 	case *discord.ModalInteraction:
 		itCache.Id = string(data.CustomID)
+		name = string(data.CustomID)
 	}
 	interactionTokenCache.Set(e.Token, itCache)
 
@@ -420,7 +426,7 @@ func (b *Bot) handleInteractionCreate(e *gateway.InteractionCreateEvent) {
 	err = PanicRecoveryMiddleware(e, &state, LoggingMiddleware, handler)
 
 	if err != nil {
-		log.Printf("Error handling interaction: %v", err)
+		log.Printf("Error handling interaction (%s): %v", name, err)
 	}
 }
 

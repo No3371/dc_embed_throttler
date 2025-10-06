@@ -36,9 +36,9 @@ func LoggingMiddleware[S any](e *gateway.InteractionCreateEvent, state *S, next 
 
 	if len(next) > 0 {
 		t := time.Now()
-		log.Printf("-> %d in %d %v", sender, channelId, e.Data.InteractionType())
+		log.Printf("\n-> %d in %d", sender, channelId)
 		err := next[0](e, state, next[1:]...)
-		log.Printf("<- %d in %d %v %v", sender, channelId, e.Data.InteractionType(), time.Since(t))
+		log.Printf("\n<- %d in %d %v", sender, channelId, time.Since(t))
 		return err
 	}
 	return nil
