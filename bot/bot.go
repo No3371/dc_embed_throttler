@@ -22,7 +22,7 @@ import (
 	"github.com/diamondburned/arikawa/v3/utils/json/option"
 	"github.com/maypok86/otter"
 )
-var userMentionRegex = regexp.MustCompile(`<@(\d+)>`)
+var userMentionRegex = regexp.MustCompile(`<@\d+>`)
 
 type InteractionHandlerState struct {
 }
@@ -224,7 +224,8 @@ func (b *Bot) TrySurpress(m *gateway.MessageCreateEvent) {
 			return
 		}
 
-		suppressedId = uint64(m.Reference.MessageID)
+		suppressedId = uint64(m.ReferencedMessage.ID)
+		log.Printf("Message %d in #%d is the maid's reply to %d", m.ID, m.ChannelID, suppressedId)
 	}
 
 	err := b.storage.TryResetQuotaOnNextDay(uint64(authorId), uint64(m.ChannelID))
@@ -457,7 +458,7 @@ func (b *Bot) handleSuppressEmbeds(e *gateway.InteractionCreateEvent) error {
 			})
 		}
 	}
-	if msg.Flags&discord.SuppressEmbeds > 0 {
+	if msg.Flags & discord.SuppressEmbeds > 0 {
 		respd := api.InteractionResponseData{
 			Content: option.NewNullableString("-# ❌ 此訊息已抑制嵌入"),
 			Flags:   discord.EphemeralMessage,
@@ -557,6 +558,27 @@ func (b *Bot) handleToggleChannel(i *gateway.InteractionCreateEvent) error {
 			Type: api.MessageInteractionWithSource,
 			Data: &api.InteractionResponseData{
 				Content: option.NewNullableString("Error toggling channel status"),
+				Flags:   discord.EphemeralMessage,
+			},
+		})
+	}
+
+	myPerms, err := b.s.Permissions(i.ChannelID, b.s.Ready().User.ID)
+	if err != nil {
+		return b.s.RespondInteraction(i.ID, i.Token, api.InteractionResponse{
+			Type: api.MessageInteractionWithSource,
+			Data: &api.InteractionResponseData{
+				Content: option.NewNullableString("Error checking permissions"),
+				Flags:   discord.EphemeralMessage,
+			},
+		})
+	}
+
+	if !myPerms.Has(discord.PermissionViewChannel) {
+		return b.s.RespondInteraction(i.ID, i.Token, api.InteractionResponse{
+			Type: api.MessageInteractionWithSource,
+			Data: &api.InteractionResponseData{
+				Content: option.NewNullableString("I can not view this channel"),
 				Flags:   discord.EphemeralMessage,
 			},
 		})
