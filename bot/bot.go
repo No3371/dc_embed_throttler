@@ -530,7 +530,7 @@ func (b *Bot) handleToggleChannel(i *gateway.InteractionCreateEvent) error {
 	}
 
 	if !myPerms.Has(discord.PermissionViewChannel) {
-		return b.RespondError(i, "I can not view this channel")
+		return b.RespondError(i, "Please check if I have permission to view this channel")
 	}
 
 	status := "disabled"
