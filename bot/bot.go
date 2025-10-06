@@ -22,17 +22,21 @@ import (
 	"github.com/diamondburned/arikawa/v3/utils/json/option"
 	"github.com/maypok86/otter"
 )
+
 var userMentionRegex = regexp.MustCompile(`<@\d+>`)
 
 type InteractionHandlerState struct {
 }
 
 type Bot struct {
-	s                  *state.State
-	storage            storage.Storage
-	config             *config.Config
-	interactionHandler Middleware[InteractionHandlerState]
-	recentSuppressedCache otter.Cache[uint64, int]
+	s                     *state.State
+	storage               storage.Storage
+	config                *config.Config
+	interactionHandler    Middleware[InteractionHandlerState]
+	recentSuppressedCache otter.Cache[uint64, struct {
+		embeds     int
+		suppressed bool
+	}]
 }
 
 func (b *Bot) RespondError(i *gateway.InteractionCreateEvent, message string) error {
@@ -46,14 +50,17 @@ func (b *Bot) RespondError(i *gateway.InteractionCreateEvent, message string) er
 }
 
 func NewBot(cfg *config.Config, store storage.Storage) (*Bot, error) {
-	c, err := otter.MustBuilder[uint64, int](256).Build()
+	c, err := otter.MustBuilder[uint64, struct {
+		embeds     int
+		suppressed bool
+	}](256).Build()
 	if err != nil {
 		return nil, err
 	}
 	return &Bot{
-		s:       state.New("Bot " + cfg.Token),
-		storage: store,
-		config:  cfg,
+		s:                     state.New("Bot " + cfg.Token),
+		storage:               store,
+		config:                cfg,
 		recentSuppressedCache: c,
 	}, nil
 }
@@ -217,12 +224,16 @@ func (b *Bot) LateSupressLoop() {
 }
 
 func (b *Bot) TrySurpress(m *gateway.MessageCreateEvent) {
-    defer func() {
-        if err := recover(); err != nil {
-            log.Printf("PANIC: %+v\n%s", err, debug.Stack())
-        }
-    }()
-	
+	defer func() {
+		if err := recover(); err != nil {
+			log.Printf("PANIC: %+v\n%s", err, debug.Stack())
+		}
+	}()
+
+	if m.Flags&discord.SuppressEmbeds != 0 {
+		return
+	}
+
 	authorId := uint64(m.Author.ID)
 	suppressedId := uint64(m.Message.ID)
 	maid := false
@@ -277,50 +288,62 @@ func (b *Bot) TrySurpress(m *gateway.MessageCreateEvent) {
 
 	if b.recentSuppressedCache.Has(suppressedId) {
 		log.Printf("Message %d in #%d has been suppressed recently", suppressedId, m.ChannelID)
-		if maid {
+		cache, _ := b.recentSuppressedCache.Get(suppressedId)
+		if maid && cache.suppressed {
 			b.Suppress(&m.Message) // also suppress maid's message anyway
 		}
 		return
 	}
 
 	log.Printf("Processing message %d in #%d", m.ID, m.ChannelID)
-	b.recentSuppressedCache.Set(suppressedId, len(m.Embeds))
 	if usage+len(m.Embeds) <= quota {
 		_, err = b.storage.IncreaseQuotaUsage(authorId, uint64(m.ChannelID), len(m.Embeds))
 		if err != nil {
 			log.Printf("Error increasing quota usage: %v", err)
 		}
+		b.recentSuppressedCache.Set(suppressedId, struct {
+			embeds     int
+			suppressed bool
+		}{
+			embeds:     len(m.Embeds),
+			suppressed: false,
+		})
 	} else {
-		if usage >= quota {
-			err = b.s.React(m.ChannelID, m.ID, discord.NewAPIEmoji(0, "🈚"))
+		if m.Author.Bot && m.Author.ID != 1290664871993806932 {
+			channelSuppressingBot, err := b.storage.IsChannelSuppressBot(uint64(m.ChannelID))
 			if err != nil {
-				log.Printf("Error reacting to message: %v", err)
+				log.Printf("Error checking if channel is suppressing bot: %v", err)
+				return
+			}
+			if !channelSuppressingBot {
+				return
 			}
 		}
-		b.Suppress(&m.Message)
+
+		err = b.Suppress(&m.Message)
+		if err != nil {
+			log.Printf("Error suppressing embeds: %v", err)
+			return
+		}
+
+		b.recentSuppressedCache.Set(suppressedId, struct {
+			embeds     int
+			suppressed bool
+		}{
+			embeds:     len(m.Embeds),
+			suppressed: true,
+		})
 	}
 }
 
-func (b *Bot) Suppress(m *discord.Message) {
-
+func (b *Bot) Suppress(m *discord.Message) (err error) {
 	if m.Flags&discord.SuppressEmbeds != 0 {
 		return
 	}
 
-	if m.Author.Bot && m.Author.ID != 1290664871993806932 {
-		channelSuppressingBot, err := b.storage.IsChannelSuppressBot(uint64(m.ChannelID))
-		if err != nil {
-			log.Printf("Error checking if channel is suppressing bot: %v", err)
-			return
-		}
-		if !channelSuppressingBot {
-			return
-		}
-	}
-
 	flags := m.Flags | discord.SuppressEmbeds
 	// Suppress embeds for the message
-	_, err := b.s.EditMessageComplex(m.ChannelID, m.ID, api.EditMessageData{
+	_, err = b.s.EditMessageComplex(m.ChannelID, m.ID, api.EditMessageData{
 		Flags: &flags,
 	})
 	if err != nil {
@@ -328,6 +351,11 @@ func (b *Bot) Suppress(m *discord.Message) {
 	}
 
 	log.Printf("Suppressing embeds for %d in #%d", m.ID, m.ChannelID)
+
+	err = b.s.React(m.ChannelID, m.ID, discord.NewAPIEmoji(0, "🈚"))
+	if err != nil {
+		log.Printf("Error reacting to message: %v", err)
+	}
 
 	if m.Author.Bot {
 		return
@@ -363,6 +391,8 @@ func (b *Bot) Suppress(m *discord.Message) {
 
 		log.Printf("Sent hint to %d", m.Author.ID)
 	}
+
+	return nil
 }
 
 type InteractionTokenCache struct {
@@ -475,8 +505,8 @@ func (b *Bot) handleSuppressEmbeds(e *gateway.InteractionCreateEvent) error {
 			return b.RespondError(e, "你不是此訊息的作者")
 		}
 	}
-	if msg.Flags & discord.SuppressEmbeds > 0 {		
-		return b.RespondError(e, "此訊息已抑制嵌入")		
+	if msg.Flags&discord.SuppressEmbeds > 0 {
+		return b.RespondError(e, "此訊息已抑制嵌入")
 	}
 
 	if time.Since(msg.Timestamp.Time()) > time.Minute {
