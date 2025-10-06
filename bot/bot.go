@@ -22,7 +22,6 @@ import (
 	"github.com/diamondburned/arikawa/v3/utils/json/option"
 	"github.com/maypok86/otter"
 )
-
 var userMentionRegex = regexp.MustCompile(`<@(\d+)>`)
 
 type InteractionHandlerState struct {
@@ -33,13 +32,19 @@ type Bot struct {
 	storage            storage.Storage
 	config             *config.Config
 	interactionHandler Middleware[InteractionHandlerState]
+	recentSuppressedCache otter.Cache[uint64, int]
 }
 
 func NewBot(cfg *config.Config, store storage.Storage) (*Bot, error) {
+	c, err := otter.MustBuilder[uint64, int](256).Build()
+	if err != nil {
+		return nil, err
+	}
 	return &Bot{
 		s:       state.New("Bot " + cfg.Token),
 		storage: store,
 		config:  cfg,
+		recentSuppressedCache: c,
 	}, nil
 }
 
@@ -203,9 +208,10 @@ func (b *Bot) LateSupressLoop() {
 
 func (b *Bot) TrySurpress(m *gateway.MessageCreateEvent) {
 	authorId := uint64(m.Author.ID)
+	suppressedId := uint64(m.Message.ID)
 	if authorId == 1290664871993806932 && strings.HasPrefix(m.Content, "<@") {
 		match := userMentionRegex.FindString(m.Content)
-		if match != "" {
+		if match == "" {
 			return
 		}
 
@@ -217,6 +223,8 @@ func (b *Bot) TrySurpress(m *gateway.MessageCreateEvent) {
 			log.Printf("Error parsing user ID: %v", err)
 			return
 		}
+
+		suppressedId = uint64(m.Reference.MessageID)
 	}
 
 	err := b.storage.TryResetQuotaOnNextDay(uint64(authorId), uint64(m.ChannelID))
@@ -248,6 +256,12 @@ func (b *Bot) TrySurpress(m *gateway.MessageCreateEvent) {
 		quota = b.config.DefaultQuota
 	}
 
+	if b.recentSuppressedCache.Has(suppressedId) {
+		log.Printf("Message %d in #%d has been suppressed recently", m.ID, m.ChannelID)
+		return
+	}
+
+	b.recentSuppressedCache.Set(suppressedId, len(m.Embeds))
 	if usage+len(m.Embeds) <= quota {
 		b.storage.IncreaseQuotaUsage(uint64(authorId), uint64(m.ChannelID), len(m.Embeds))
 	} else {
