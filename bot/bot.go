@@ -217,6 +217,12 @@ func (b *Bot) LateSupressLoop() {
 }
 
 func (b *Bot) TrySurpress(m *gateway.MessageCreateEvent) {
+    defer func() {
+        if err := recover(); err != nil {
+            log.Printf("PANIC: %+v\n%s", err, debug.Stack())
+        }
+    }()
+	
 	authorId := uint64(m.Author.ID)
 	suppressedId := uint64(m.Message.ID)
 	if authorId == 1290664871993806932 && strings.HasPrefix(m.Content, "<@") {
