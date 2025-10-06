@@ -10,8 +10,8 @@ import (
 )
 
 type User struct {
-	UserID uint64
-	Hinted int
+	UserID     uint64
+	Hinted     int
 	NextHintAt time.Time
 }
 
@@ -106,11 +106,12 @@ func (s *SQLiteStorage) GetQuotaUsage(userID, channelID uint64) (int, error) {
 func (s *SQLiteStorage) IncreaseQuotaUsage(userID, channelID uint64, delta int) (int, error) {
 	var count int
 	err := s.db.QueryRow(`
-		INSERT INTO restore_counts (user_id, channel_id, count)
-		VALUES (?, ?, 0)
-		ON CONFLICT(user_id, channel_id) DO UPDATE SET count = count + ?
-		RETURNING count
-	`, userID, channelID, delta).Scan(&count)
+INSERT INTO restore_counts (user_id, channel_id, count)
+VALUES (?, ?, 0)
+ON CONFLICT(user_id, channel_id)
+DO UPDATE SET count = count + ?
+RETURNING count
+`, userID, channelID, delta).Scan(&count)
 	if err != nil {
 		return 0, err
 	}
@@ -180,14 +181,13 @@ func (s *SQLiteStorage) SetNextHintAt(userID uint64, nextHintAt time.Time) error
 
 func (s *SQLiteStorage) IncreaseHinted(userID uint64) error {
 	_, err := s.db.Exec(`INSERT INTO user (user_id, hinted) VALUES (?, 1)
-	ON CONFLICT(user_id) DO UPDATE SET hinted = hinted + 1`, userID,)
+	ON CONFLICT(user_id) DO UPDATE SET hinted = hinted + 1`, userID)
 	return err
 }
 
-
 type RoleQuota struct {
-	RoleID uint64
-	Quota  int
+	RoleID   uint64
+	Quota    int
 	Priority int
 }
 
