@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"regexp"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +22,8 @@ import (
 	"github.com/diamondburned/arikawa/v3/utils/json/option"
 	"github.com/maypok86/otter"
 )
+
+var userMentionRegex = regexp.MustCompile(`<@(\d+)>`)
 
 type InteractionHandlerState struct {
 }
@@ -198,14 +202,31 @@ func (b *Bot) LateSupressLoop() {
 }
 
 func (b *Bot) TrySurpress(m *gateway.MessageCreateEvent) {
-	err := b.storage.TryResetQuotaOnNextDay(uint64(m.Author.ID), uint64(m.ChannelID))
+	authorId := uint64(m.Author.ID)
+	if authorId == 1290664871993806932 && strings.HasPrefix(m.Content, "<@") {
+		match := userMentionRegex.FindString(m.Content)
+		if match != "" {
+			return
+		}
+
+		match = match[2:]
+		match = match[:len(match)-1]
+		var err error
+		authorId, err = strconv.ParseUint(match, 10, 64)
+		if err != nil {
+			log.Printf("Error parsing user ID: %v", err)
+			return
+		}
+	}
+
+	err := b.storage.TryResetQuotaOnNextDay(uint64(authorId), uint64(m.ChannelID))
 	if err != nil {
 		log.Printf("Error resetting restore count: %v", err)
 	}
 
-	usage, err := b.storage.GetQuotaUsage(uint64(m.Author.ID), uint64(m.ChannelID))
+	usage, err := b.storage.GetQuotaUsage(uint64(authorId), uint64(m.ChannelID))
 	if errors.Is(err, sql.ErrNoRows) {
-		err = b.storage.ResetQuotaUsage(uint64(m.Author.ID), uint64(m.ChannelID))
+		err = b.storage.ResetQuotaUsage(uint64(authorId), uint64(m.ChannelID))
 	}
 	if err != nil {
 		log.Printf("Error getting restore count: %v", err)
@@ -228,7 +249,7 @@ func (b *Bot) TrySurpress(m *gateway.MessageCreateEvent) {
 	}
 
 	if usage+len(m.Embeds) <= quota {
-		b.storage.IncreaseQuotaUsage(uint64(m.Author.ID), uint64(m.ChannelID), len(m.Embeds))
+		b.storage.IncreaseQuotaUsage(uint64(authorId), uint64(m.ChannelID), len(m.Embeds))
 	} else {
 		if usage >= quota {
 			err = b.s.React(m.ChannelID, m.ID, discord.NewAPIEmoji(0, "🈚"))
@@ -246,7 +267,7 @@ func (b *Bot) Suppress(m *discord.Message) {
 		return
 	}
 
-	if m.Author.Bot {
+	if m.Author.Bot && m.Author.ID != 1290664871993806932 {
 		channelSuppressingBot, err := b.storage.IsChannelSuppressBot(uint64(m.ChannelID))
 		if err != nil {
 			log.Printf("Error checking if channel is suppressing bot: %v", err)
