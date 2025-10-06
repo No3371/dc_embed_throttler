@@ -514,6 +514,15 @@ func (b *Bot) handleToggleChannel(i *gateway.InteractionCreateEvent) error {
 		return b.RespondError(i, "You need the Manage Channels permission to use this command")
 	}
 
+	myPerms, err := b.s.Permissions(i.ChannelID, b.s.Ready().User.ID)
+	if err != nil {
+		return b.RespondError(i, "Error checking permissions")
+	}
+
+	if !myPerms.Has(discord.PermissionViewChannel) {
+		return b.RespondError(i, "Please check if I have permission to view this channel")
+	}
+	
 	enabled, err := b.storage.IsChannelEnabled(uint64(i.ChannelID))
 	if err != nil {
 		return b.RespondError(i, "Error checking channel status")
@@ -522,15 +531,6 @@ func (b *Bot) handleToggleChannel(i *gateway.InteractionCreateEvent) error {
 	err = b.storage.SetChannelEnabled(uint64(i.ChannelID), !enabled)
 	if err != nil {
 		return b.RespondError(i, "Error toggling channel status")
-	}
-
-	myPerms, err := b.s.Permissions(i.ChannelID, b.s.Ready().User.ID)
-	if err != nil {
-		return b.RespondError(i, "Error checking permissions")
-	}
-
-	if !myPerms.Has(discord.PermissionViewChannel) {
-		return b.RespondError(i, "Please check if I have permission to view this channel")
 	}
 
 	status := "disabled"
