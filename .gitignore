@@ -3,3 +3,4 @@
 .vscode/launch.json
 config/config.yaml
 *.db
+config/config_dev.yaml
