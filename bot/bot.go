@@ -35,6 +35,16 @@ type Bot struct {
 	recentSuppressedCache otter.Cache[uint64, int]
 }
 
+func (b *Bot) RespondError(i *gateway.InteractionCreateEvent, message string) error {
+	return b.s.RespondInteraction(i.ID, i.Token, api.InteractionResponse{
+		Type: api.MessageInteractionWithSource,
+		Data: &api.InteractionResponseData{
+			Content: option.NewNullableString("❌ " + message),
+			Flags:   discord.EphemeralMessage,
+		},
+	})
+}
+
 func NewBot(cfg *config.Config, store storage.Storage) (*Bot, error) {
 	c, err := otter.MustBuilder[uint64, int](256).Build()
 	if err != nil {
@@ -438,45 +448,20 @@ func (b *Bot) handleSuppressEmbeds(e *gateway.InteractionCreateEvent) error {
 
 	msg, ok := data.Resolved.Messages[data.TargetMessageID()]
 	if !ok {
-		return b.s.RespondInteraction(e.ID, e.Token, api.InteractionResponse{
-			Type: api.MessageInteractionWithSource,
-			Data: &api.InteractionResponseData{
-				Content: option.NewNullableString("Message not found"),
-				Flags:   discord.EphemeralMessage,
-			},
-		})
+		return b.RespondError(e, "Message not found")
 	}
 
 	if msg.Author.ID != sender {
 		if !(msg.Author.ID == 1290664871993806932 && strings.HasPrefix(msg.Content, fmt.Sprintf("<@%d>", sender))) {
-			return b.s.RespondInteraction(e.ID, e.Token, api.InteractionResponse{
-				Type: api.MessageInteractionWithSource,
-				Data: &api.InteractionResponseData{
-					Content: option.NewNullableString("-# ❌ 您不是此訊息的作者"),
-					Flags:   discord.EphemeralMessage,
-				},
-			})
+			return b.RespondError(e, "你不是此訊息的作者")
 		}
 	}
-	if msg.Flags & discord.SuppressEmbeds > 0 {
-		respd := api.InteractionResponseData{
-			Content: option.NewNullableString("-# ❌ 此訊息已抑制嵌入"),
-			Flags:   discord.EphemeralMessage,
-		}
-		return b.s.RespondInteraction(e.ID, e.Token, api.InteractionResponse{
-			Type: api.MessageInteractionWithSource,
-			Data: &respd,
-		})
+	if msg.Flags & discord.SuppressEmbeds > 0 {		
+		return b.RespondError(e, "此訊息已抑制嵌入")		
 	}
 
 	if time.Since(msg.Timestamp.Time()) > time.Minute {
-		return b.s.RespondInteraction(e.ID, e.Token, api.InteractionResponse{
-			Type: api.MessageInteractionWithSource,
-			Data: &api.InteractionResponseData{
-				Content: option.NewNullableString("-# ❌ 無法在一分鐘後回收額度"),
-				Flags:   discord.EphemeralMessage,
-			},
-		})
+		return b.RespondError(e, "無法在一分鐘後回收額度")
 	}
 
 	flags := msg.Flags | discord.SuppressEmbeds
@@ -522,66 +507,30 @@ func (b *Bot) handleToggleChannel(i *gateway.InteractionCreateEvent) error {
 	// Check if user has manage channel permission
 	perms, err := b.s.Permissions(i.ChannelID, i.Member.User.ID)
 	if err != nil {
-		return b.s.RespondInteraction(i.ID, i.Token, api.InteractionResponse{
-			Type: api.MessageInteractionWithSource,
-			Data: &api.InteractionResponseData{
-				Content: option.NewNullableString("Error checking permissions"),
-				Flags:   discord.EphemeralMessage,
-			},
-		})
+		return b.RespondError(i, "Error checking permissions")
 	}
 
 	if !perms.Has(discord.PermissionManageChannels) {
-		return b.s.RespondInteraction(i.ID, i.Token, api.InteractionResponse{
-			Type: api.MessageInteractionWithSource,
-			Data: &api.InteractionResponseData{
-				Content: option.NewNullableString("You need the Manage Channels permission to use this command"),
-				Flags:   discord.EphemeralMessage,
-			},
-		})
+		return b.RespondError(i, "You need the Manage Channels permission to use this command")
 	}
 
 	enabled, err := b.storage.IsChannelEnabled(uint64(i.ChannelID))
 	if err != nil {
-		return b.s.RespondInteraction(i.ID, i.Token, api.InteractionResponse{
-			Type: api.MessageInteractionWithSource,
-			Data: &api.InteractionResponseData{
-				Content: option.NewNullableString("Error checking channel status"),
-				Flags:   discord.EphemeralMessage,
-			},
-		})
+		return b.RespondError(i, "Error checking channel status")
 	}
 
 	err = b.storage.SetChannelEnabled(uint64(i.ChannelID), !enabled)
 	if err != nil {
-		return b.s.RespondInteraction(i.ID, i.Token, api.InteractionResponse{
-			Type: api.MessageInteractionWithSource,
-			Data: &api.InteractionResponseData{
-				Content: option.NewNullableString("Error toggling channel status"),
-				Flags:   discord.EphemeralMessage,
-			},
-		})
+		return b.RespondError(i, "Error toggling channel status")
 	}
 
 	myPerms, err := b.s.Permissions(i.ChannelID, b.s.Ready().User.ID)
 	if err != nil {
-		return b.s.RespondInteraction(i.ID, i.Token, api.InteractionResponse{
-			Type: api.MessageInteractionWithSource,
-			Data: &api.InteractionResponseData{
-				Content: option.NewNullableString("Error checking permissions"),
-				Flags:   discord.EphemeralMessage,
-			},
-		})
+		return b.RespondError(i, "Error checking permissions")
 	}
 
 	if !myPerms.Has(discord.PermissionViewChannel) {
-		return b.s.RespondInteraction(i.ID, i.Token, api.InteractionResponse{
-			Type: api.MessageInteractionWithSource,
-			Data: &api.InteractionResponseData{
-				Content: option.NewNullableString("I can not view this channel"),
-				Flags:   discord.EphemeralMessage,
-			},
-		})
+		return b.RespondError(i, "I can not view this channel")
 	}
 
 	status := "disabled"
