@@ -1,6 +1,8 @@
-.env
+*.env
 *.exe
 .vscode/launch.json
 config/config.yaml
 *.db
 config/config_dev.yaml
+*.db-shm
+*.db-wal
