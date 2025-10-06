@@ -275,7 +275,10 @@ func (b *Bot) TrySurpress(m *gateway.MessageCreateEvent) {
 	log.Printf("Processing message %d in #%d", m.ID, m.ChannelID)
 	b.recentSuppressedCache.Set(suppressedId, len(m.Embeds))
 	if usage+len(m.Embeds) <= quota {
-		b.storage.IncreaseQuotaUsage(authorId, uint64(m.ChannelID), len(m.Embeds))
+		_, err = b.storage.IncreaseQuotaUsage(authorId, uint64(m.ChannelID), len(m.Embeds))
+		if err != nil {
+			log.Printf("Error increasing quota usage: %v", err)
+		}
 	} else {
 		if usage >= quota {
 			err = b.s.React(m.ChannelID, m.ID, discord.NewAPIEmoji(0, "🈚"))
