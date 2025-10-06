@@ -250,6 +250,11 @@ func (b *Bot) TrySurpress(m *gateway.MessageCreateEvent) {
 		return
 	}
 
+	count := len(m.Embeds)
+	if count == 0 && len(m.MessageSnapshots) > 0 && len(m.MessageSnapshots[0].Message.Embeds) > 0 {
+		count = len(m.MessageSnapshots[0].Message.Embeds)
+	}
+
 	authorId := uint64(m.Author.ID)
 	suppressedId := uint64(m.Message.ID)
 	maid := false
@@ -312,8 +317,8 @@ func (b *Bot) TrySurpress(m *gateway.MessageCreateEvent) {
 	}
 
 	log.Printf("Processing message %d in #%d", m.ID, m.ChannelID)
-	if usage+len(m.Embeds) <= quota {
-		_, err = b.storage.IncreaseQuotaUsage(authorId, uint64(m.ChannelID), len(m.Embeds))
+	if usage+count <= quota {
+		_, err = b.storage.IncreaseQuotaUsage(authorId, uint64(m.ChannelID), count)
 		if err != nil {
 			log.Printf("Error increasing quota usage: %v", err)
 		}
@@ -321,7 +326,7 @@ func (b *Bot) TrySurpress(m *gateway.MessageCreateEvent) {
 			embeds     int
 			suppressed bool
 		}{
-			embeds:     len(m.Embeds),
+			embeds:     count,
 			suppressed: false,
 		})
 	} else {
@@ -346,7 +351,7 @@ func (b *Bot) TrySurpress(m *gateway.MessageCreateEvent) {
 			embeds     int
 			suppressed bool
 		}{
-			embeds:     len(m.Embeds),
+			embeds:     count,
 			suppressed: true,
 		})
 	}
