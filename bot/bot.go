@@ -195,8 +195,8 @@ func (b *Bot) LateSupressLoop() {
 		var countHttp int64 = int64(strings.Count(mv.Content, "http"))
 		countHttp = min(countHttp, 10)
 
-		if time.Since(mv.Timestamp.Time()) < time.Duration(countHttp*int64(time.Millisecond)*125) {
-			time.Sleep(time.Duration(countHttp*int64(time.Millisecond)*125) - time.Since(mv.Timestamp.Time()))
+		if time.Since(mv.Timestamp.Time()) < time.Duration(countHttp*int64(time.Millisecond)*250) {
+			time.Sleep(time.Duration(countHttp*int64(time.Millisecond)*250) - time.Since(mv.Timestamp.Time()))
 		}
 
 		msg, err := b.s.Message(mv.ChannelID, mv.ID)
