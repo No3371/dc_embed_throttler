@@ -238,14 +238,14 @@ func (b *Bot) TrySurpress(m *gateway.MessageCreateEvent) {
 		log.Printf("Message %d in #%d is the maid's reply to %d", m.ID, m.ChannelID, suppressedId)
 	}
 
-	err := b.storage.TryResetQuotaOnNextDay(uint64(authorId), uint64(m.ChannelID))
+	err := b.storage.TryResetQuotaOnNextDay(authorId, uint64(m.ChannelID))
 	if err != nil {
 		log.Printf("Error resetting restore count: %v", err)
 	}
 
-	usage, err := b.storage.GetQuotaUsage(uint64(authorId), uint64(m.ChannelID))
+	usage, err := b.storage.GetQuotaUsage(authorId, uint64(m.ChannelID))
 	if errors.Is(err, sql.ErrNoRows) {
-		err = b.storage.ResetQuotaUsage(uint64(authorId), uint64(m.ChannelID))
+		err = b.storage.ResetQuotaUsage(authorId, uint64(m.ChannelID))
 	}
 	if err != nil {
 		log.Printf("Error getting restore count: %v", err)
@@ -272,9 +272,10 @@ func (b *Bot) TrySurpress(m *gateway.MessageCreateEvent) {
 		return
 	}
 
+	log.Printf("Processing message %d in #%d", m.ID, m.ChannelID)
 	b.recentSuppressedCache.Set(suppressedId, len(m.Embeds))
 	if usage+len(m.Embeds) <= quota {
-		b.storage.IncreaseQuotaUsage(uint64(authorId), uint64(m.ChannelID), len(m.Embeds))
+		b.storage.IncreaseQuotaUsage(authorId, uint64(m.ChannelID), len(m.Embeds))
 	} else {
 		if usage >= quota {
 			err = b.s.React(m.ChannelID, m.ID, discord.NewAPIEmoji(0, "🈚"))
@@ -522,7 +523,7 @@ func (b *Bot) handleToggleChannel(i *gateway.InteractionCreateEvent) error {
 	if !myPerms.Has(discord.PermissionViewChannel) {
 		return b.RespondError(i, "Please check if I have permission to view this channel")
 	}
-	
+
 	enabled, err := b.storage.IsChannelEnabled(uint64(i.ChannelID))
 	if err != nil {
 		return b.RespondError(i, "Error checking channel status")
