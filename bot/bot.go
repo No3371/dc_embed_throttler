@@ -225,6 +225,7 @@ func (b *Bot) TrySurpress(m *gateway.MessageCreateEvent) {
 	
 	authorId := uint64(m.Author.ID)
 	suppressedId := uint64(m.Message.ID)
+	maid := false
 	if authorId == 1290664871993806932 && strings.HasPrefix(m.Content, "<@") {
 		match := userMentionRegex.FindString(m.Content)
 		if match == "" {
@@ -242,6 +243,7 @@ func (b *Bot) TrySurpress(m *gateway.MessageCreateEvent) {
 
 		suppressedId = uint64(m.ReferencedMessage.ID)
 		log.Printf("Message %d in #%d is the maid's reply to %d", m.ID, m.ChannelID, suppressedId)
+		maid = true
 	}
 
 	err := b.storage.TryResetQuotaOnNextDay(authorId, uint64(m.ChannelID))
@@ -274,7 +276,10 @@ func (b *Bot) TrySurpress(m *gateway.MessageCreateEvent) {
 	}
 
 	if b.recentSuppressedCache.Has(suppressedId) {
-		log.Printf("Message %d in #%d has been suppressed recently", m.ID, m.ChannelID)
+		log.Printf("Message %d in #%d has been suppressed recently", suppressedId, m.ChannelID)
+		if maid {
+			b.Suppress(&m.Message) // also suppress maid's message anyway
+		}
 		return
 	}
 
@@ -324,6 +329,10 @@ func (b *Bot) Suppress(m *discord.Message) {
 
 	log.Printf("Suppressing embeds for %d in #%d", m.ID, m.ChannelID)
 
+	if m.Author.Bot {
+		return
+	}
+
 	user, err := b.storage.GetUser(uint64(m.Author.ID))
 	if errors.Is(err, sql.ErrNoRows) {
 		err = nil
@@ -333,7 +342,7 @@ func (b *Bot) Suppress(m *discord.Message) {
 		return
 	}
 
-	if !m.Author.Bot && time.Now().After(user.NextHintAt) {
+	if time.Now().After(user.NextHintAt) {
 		ch, err := b.s.CreatePrivateChannel(m.Author.ID)
 		if err != nil {
 			log.Printf("Error creating private channel: %v", err)
