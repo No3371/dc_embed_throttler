@@ -255,6 +255,18 @@ func (b *Bot) TrySurpress(m *gateway.MessageCreateEvent) {
 		count = len(m.MessageSnapshots[0].Message.Embeds)
 	}
 
+	ignoring := 0
+	for _, embed := range m.Embeds {
+		if embed.Provider.Name == "Tenor" && (embed.Video != nil || embed.Image != nil) {
+			ignoring++
+		}
+	}
+
+	if ignoring == count {
+		log.Printf("Message %d is a Tenor gif, ignoring", m.ID)
+		return
+	}
+
 	authorId := uint64(m.Author.ID)
 	suppressedId := uint64(m.Message.ID)
 	maid := false
