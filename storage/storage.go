@@ -82,7 +82,7 @@ func NewSQLiteStorage(dbPath string) (*SQLiteStorage, error) {
 func (s *SQLiteStorage) TryResetQuotaOnNextDay(userID, channelID uint64) error {
 	taipeiTime := time.Now().UTC().Add(time.Hour * 8).Truncate(time.Hour * 24)
 	_, err := s.db.Exec(`UPDATE restore_counts SET count = 0, last_reset_at = ?
-WHERE user_id = ? AND channel_id = ? AND last_reset_at < ?`, taipeiTime, userID, channelID, taipeiTime)
+WHERE user_id = ? AND channel_id = ? AND last_reset_at <= ?`, taipeiTime, userID, channelID, taipeiTime)
 	return err
 }
 
