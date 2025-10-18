@@ -47,7 +47,7 @@ func NewSQLiteStorage(dbPath string) (*SQLiteStorage, error) {
 
 	// Create tables if they don't exist
 	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS restore_counts (
+		CREATE TABLE IF NOT EXISTS quota_usage (
 			user_id INTEGER,
 			channel_id INTEGER,
 			count INTEGER DEFAULT 0,
@@ -80,15 +80,17 @@ func NewSQLiteStorage(dbPath string) (*SQLiteStorage, error) {
 }
 
 func (s *SQLiteStorage) TryResetQuotaOnNextDay(userID, channelID uint64) error {
-	taipeiTime := time.Now().UTC().Add(time.Hour * 8).Truncate(time.Hour * 24)
-	_, err := s.db.Exec(`UPDATE restore_counts SET count = 0, last_reset_at = ?
-WHERE user_id = ? AND channel_id = ? AND last_reset_at <= ?`, taipeiTime, userID, channelID, taipeiTime)
+	taipeiTime := time.Now().UTC().Add(time.Hour * 8)
+	taipeiTimeMidnight := taipeiTime.Truncate(time.Hour * 24)
+	_, err := s.db.Exec(`UPDATE quota_usage SET count = 0, last_reset_at = ?
+WHERE user_id = ? AND channel_id = ? AND last_reset_at <= ?`, taipeiTime, userID, channelID, taipeiTimeMidnight)
 	return err
 }
 
 func (s *SQLiteStorage) ResetQuotaUsage(userID, channelID uint64) error {
-	_, err := s.db.Exec(`INSERT INTO restore_counts (user_id, channel_id) VALUES (?, ?)
-ON CONFLICT(user_id, channel_id) DO UPDATE SET count = 0, last_reset_at = CURRENT_TIMESTAMP`, userID, channelID)
+	taipeiTime := time.Now().UTC().Add(time.Hour * 8)
+	_, err := s.db.Exec(`INSERT INTO quota_usage (user_id, channel_id, last_reset_at) VALUES (?, ?, ?)
+ON CONFLICT(user_id, channel_id) DO UPDATE SET count = 0, last_reset_at = ?`, userID, channelID, taipeiTime, taipeiTime)
 	return err
 }
 
@@ -99,14 +101,14 @@ func (s *SQLiteStorage) GetQuotaUsage(userID, channelID uint64) (int, error) {
 	}
 
 	var count int
-	err = s.db.QueryRow("SELECT count FROM restore_counts WHERE user_id = ? AND channel_id = ?", userID, channelID).Scan(&count)
+	err = s.db.QueryRow("SELECT count FROM quota_usage WHERE user_id = ? AND channel_id = ?", userID, channelID).Scan(&count)
 	return count, err
 }
 
 func (s *SQLiteStorage) IncreaseQuotaUsage(userID, channelID uint64, delta int) (int, error) {
 	var count int
 	err := s.db.QueryRow(`
-INSERT INTO restore_counts (user_id, channel_id, count)
+INSERT INTO quota_usage (user_id, channel_id, count)
 VALUES (?, ?, 0)
 ON CONFLICT(user_id, channel_id)
 DO UPDATE SET count = count + ?
@@ -121,7 +123,7 @@ RETURNING count
 func (s *SQLiteStorage) DecreaseQuotaUsage(userID, channelID uint64, delta int) (int, error) {
 	var count int
 	err := s.db.QueryRow(`
-		UPDATE restore_counts SET count = count - ? WHERE user_id = ? AND channel_id = ? AND count > 0
+		UPDATE quota_usage SET count = count - ? WHERE user_id = ? AND channel_id = ? AND count > 0
 		RETURNING count
 	`, delta, userID, channelID).Scan(&count)
 	if err != nil {
