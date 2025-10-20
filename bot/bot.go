@@ -552,9 +552,19 @@ func (b *Bot) handleSuppressEmbeds(e *gateway.InteractionCreateEvent) error {
 		Flags: &flags,
 	})
 
-	remaining, err := b.storage.DecreaseQuotaUsage(uint64(sender), uint64(channelId), len(msg.Embeds))
 	if err != nil {
-		log.Printf("Error decrementing restore count: %v", err)
+		log.Printf("Error editing message: %v", err)
+		return b.RespondError(e, "Discord 端發生錯誤")
+	}
+
+	err = b.storage.TryResetQuotaOnNextDay(uint64(sender), uint64(channelId))
+	if err != nil {
+		log.Printf("Error resetting quota usage: %v", err)
+	}
+
+	usage, err := b.storage.DecreaseQuotaUsage(uint64(sender), uint64(channelId), len(msg.Embeds))
+	if err != nil {
+		log.Printf("Error decrementing quota usage: %v", err)
 	}
 
 	roleIDs := make([]uint64, len(e.Member.RoleIDs))
@@ -571,7 +581,7 @@ func (b *Bot) handleSuppressEmbeds(e *gateway.InteractionCreateEvent) error {
 	}
 
 	respd := api.InteractionResponseData{
-		Content: option.NewNullableString(fmt.Sprintf("-# ✅ 於此頻道展開額度：%d/%d", quota-remaining, quota)),
+		Content: option.NewNullableString(fmt.Sprintf("-# ✅ 於此頻道展開額度：%d/%d", quota-usage, quota)),
 		Flags:   discord.EphemeralMessage,
 	}
 	err = b.s.RespondInteraction(e.ID, e.Token, api.InteractionResponse{
