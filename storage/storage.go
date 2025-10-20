@@ -83,7 +83,7 @@ func (s *SQLiteStorage) TryResetQuotaOnNextDay(userID, channelID uint64) error {
 	taipeiTime := time.Now().UTC().Add(time.Hour * 8)
 	taipeiTimeMidnight := taipeiTime.Truncate(time.Hour * 24)
 	_, err := s.db.Exec(`UPDATE quota_usage SET count = 0, last_reset_at = ?
-WHERE user_id = ? AND channel_id = ? AND last_reset_at <= ?`, taipeiTime, userID, channelID, taipeiTimeMidnight)
+WHERE user_id = ? AND channel_id = ? AND last_reset_at < ?`, taipeiTime, userID, channelID, taipeiTimeMidnight)
 	return err
 }
 
@@ -120,12 +120,12 @@ RETURNING count
 	return count, nil
 }
 
-func (s *SQLiteStorage) DecreaseQuotaUsage(userID, channelID uint64, delta int) (int, error) {
+func (s *SQLiteStorage) DecreaseQuotaUsage(userID, channelID uint64, amount int) (int, error) {
 	var count int
 	err := s.db.QueryRow(`
 		UPDATE quota_usage SET count = count - ? WHERE user_id = ? AND channel_id = ? AND count > 0
 		RETURNING count
-	`, delta, userID, channelID).Scan(&count)
+	`, amount, userID, channelID).Scan(&count)
 	if err != nil {
 		return 0, err
 	}

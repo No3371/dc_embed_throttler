@@ -211,7 +211,7 @@ func (b *Bot) LateSupressLoop() {
 		mv := <-ChanDeferredSuppress
 
 		var countHttp int64 = int64(strings.Count(mv.Content, "http"))
-		countHttp = min(countHttp, 10)
+		countHttp = 1 + min(countHttp, 10)
 
 		if time.Since(mv.Timestamp.Time()) < time.Duration(countHttp*int64(time.Millisecond)*250) {
 			time.Sleep(time.Duration(countHttp*int64(time.Millisecond)*250) - time.Since(mv.Timestamp.Time()))
@@ -226,7 +226,7 @@ func (b *Bot) LateSupressLoop() {
 		if len(msg.Embeds) == 0 {
 			if len(msg.MessageSnapshots) > 0 && len(msg.MessageSnapshots[0].Message.Embeds) > 0 {
 				b.TrySurpress(mv)
-				return
+				continue
 			} else {
 				log.Printf("(Deferred) Message %d has no embeds and not potential link", msg.ID)
 				continue
@@ -290,17 +290,12 @@ func (b *Bot) TrySurpress(m *gateway.MessageCreateEvent) {
 		maid = true
 	}
 
-	err := b.storage.TryResetQuotaOnNextDay(authorId, uint64(m.ChannelID))
-	if err != nil {
-		log.Printf("Error resetting restore count: %v", err)
-	}
-
 	usage, err := b.storage.GetQuotaUsage(authorId, uint64(m.ChannelID))
 	if errors.Is(err, sql.ErrNoRows) {
 		err = b.storage.ResetQuotaUsage(authorId, uint64(m.ChannelID))
 	}
 	if err != nil {
-		log.Printf("Error getting restore count: %v", err)
+		log.Printf("Error getting quota usage: %v", err)
 	}
 
 	roleIDs := make([]uint64, len(m.Member.RoleIDs))
@@ -544,6 +539,10 @@ func (b *Bot) handleSuppressEmbeds(e *gateway.InteractionCreateEvent) error {
 
 	if time.Since(msg.Timestamp.Time()) > time.Minute {
 		return b.RespondError(e, "無法在一分鐘後回收額度")
+	}
+
+	if len(msg.Embeds) == 0 {
+		return b.RespondError(e, "Bot 端從 Discord 端取得的此訊息並未包含任何嵌入項目")
 	}
 
 	flags := msg.Flags | discord.SuppressEmbeds
